@@ -9,7 +9,8 @@ from tensorflow.python.framework import graph_io
 
 input_node_name = 'input'
 output_node_name = 'output'
-output_graph_name = './netvlad_frozen.pb'
+frozen_graph_output_name = 'model.graphdef'
+onnx_output_name = 'model.onnx'
 placeholder_shape = [None, 720, 1280, 3]
 input_shape = [1, 720, 1280, 3]
 
@@ -38,7 +39,7 @@ def replace(checkpoint_dir, replace_from, replace_to, save_name=None):
             print("replace checkpoint was save to {}".format(save_name))
 
 
-def gen_frozen_graph(checkpoint_dir=nets.defaultCheckpoint(), save_result=False):
+def gen_serving_model(checkpoint_dir=nets.defaultCheckpoint(), save_result=False, is_onnx_model=False):
     tf.reset_default_graph()
     net_in = tf.placeholder(dtype=tf.float32, shape=placeholder_shape, name='input')
     net_out = nets.vgg16NetvladPca(net_in)
@@ -59,14 +60,21 @@ def gen_frozen_graph(checkpoint_dir=nets.defaultCheckpoint(), save_result=False)
                                                                     sess.graph_def,
                                                                     output_node_names=[output_node_name])
         frozen_graph = tf.compat.v1.graph_util.remove_training_nodes(frozen_graph)
-
-        graph_io.write_graph(frozen_graph, '', output_graph_name, as_text=False)
-
-    print('Frozen graph InputName: [{}] \t->\t OutputName: [{}]'.format(input_node_name, output_node_name))
+    if is_onnx_model:
+        import tf2onnx
+        model_proto, external_tensor_storage = tf2onnx.convert.from_graph_def(frozen_graph,
+                                                                              input_names=[net_in.name],
+                                                                              output_names=[net_out.name],
+                                                                              opset=11,
+                                                                              output_path=onnx_output_name)
+        print('Onnx InputName: [{}] \t->\t OutputName: [{}]'.format(input_node_name, output_node_name))
+    else:
+        graph_io.write_graph(frozen_graph, '', frozen_graph_output_name, as_text=False)
+        print('Frozen graph InputName: [{}] \t->\t OutputName: [{}]'.format(input_node_name, output_node_name))
 
 
 def load_frozen_graph():
-    with tf.io.gfile.GFile(output_graph_name, 'rb') as f:
+    with tf.io.gfile.GFile(frozen_graph_output_name, 'rb') as f:
         frozen_graph = tf.compat.v1.GraphDef()
         frozen_graph.ParseFromString(f.read())
     G = tf.Graph()
@@ -86,6 +94,6 @@ def load_frozen_graph():
 
 if __name__ == '__main__':
     checkpoint = nets.defaultCheckpoint() + '_strip'
-    replace(nets.defaultCheckpoint(), 'vgg16_netvlad_pca/', '', save_name=checkpoint)
-    gen_frozen_graph(checkpoint_dir=checkpoint)
-    load_frozen_graph()
+    # replace(nets.defaultCheckpoint(), 'vgg16_netvlad_pca/', '', save_name=checkpoint)
+    gen_serving_model(checkpoint_dir=checkpoint, is_onnx_model=True)
+    # load_frozen_graph()
